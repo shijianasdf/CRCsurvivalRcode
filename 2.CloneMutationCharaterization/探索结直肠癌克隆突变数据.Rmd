@@ -1,0 +1,213 @@
+---
+title: "探索克隆突变数据"
+author: "shijian"
+date: "2019年3月11日"
+output: 
+   html_document: 
+    code_download: true
+    # code_folding: hide
+    highlight: pygments
+    # number_sections: yes
+    # theme: "flatly"
+    toc: TRUE
+    toc_float: TRUE
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 一.加载数据
+### 1.加载结直肠癌克隆突变数据
+```{r}
+load("D:/R/Project/预后分析/克隆预后分析/结直肠癌克隆预后分析/colorectal.clone.data/colorectal.select.clone.data.RData")
+```
+### 2.加载结直肠癌driver gene
+```{r}
+load("D:/R/Project/预后分析/克隆预后分析/结直肠癌克隆预后分析/colorectal.driver.gene.data/ColorectalDriverGenes.RData")
+length(ColorectalDriverGenes)
+```
+### 3.加载结直肠癌临床数据
+```{r}
+load("D:/R/Project/预后分析/克隆预后分析/结直肠癌克隆预后分析/colorectal.clinical.data/colorectal_clinical_data_patient.RData");
+```
+
+# 二.病人突变状态比例
+### 1.筛选具有临床数据的结直肠癌克隆突变数据，对结直肠癌克隆突变数据依据driver gene进行过滤
+```{r }
+intersect.patients <- intersect(colorectal.clinic.data$PATIENT_ID,colorectal.select.table$patient)
+length(intersect.patients) #基于临床数据和克隆突变数据，得到536个交集病人
+colorectal.select.table <- colorectal.select.table[colorectal.select.table$patient %in% intersect.patients,] #提取536个病人的克隆突变数据
+colorectal.select.table <- colorectal.select.table[colorectal.select.table$Hugo_Symbol %in% ColorectalDriverGenes,] #进一步提取97个driver基因的克隆突变数据，这个过程中因为4个driver基因没有突变，23个病人在这97个driver基因中没有突变
+head(colorectal.select.table)
+sort(table(colorectal.select.table$Variant_Classification),decreasing = T) #变异类型
+length(colorectal.select.table$mutation_id) #4167个突变
+length(unique(colorectal.select.table$patient)) #513个样本在结直肠癌driver基因上有突变
+table(colorectal.select.table$CI95.timing) #所有突变的克隆状态和亚克隆状态个数
+sort(table(colorectal.select.table$patient),decreasing = T)  #每个病人发生突变数
+length(unique(colorectal.select.table$Hugo_Symbol)) #总共有93个driver基因发生突变
+sort(table(colorectal.select.table$Hugo_Symbol),decreasing = T) #每个基因发生突变数
+```
+
+### 2.统计具有不同突变状态的病人百分比并且构造饼图可视化数据
+```{r}
+State <- by(colorectal.select.table,colorectal.select.table$patient,function(x){
+                             ifelse(length(unique(x$CI95.timing))==2,"clonal-subclonal",
+                             ifelse(unique(x$CI95.timing)=="Clonal","Clonal","Subclonal"))})
+State <- as.character(State)
+table(State)
+pie.df <- data.frame(group = c("unmutated", "clonal-subclonal", "clonal","subclonal"),
+                     value = c(536-513, 283, 224,6))
+pie.df
+```
+
+### 3.绘制饼图，观察不同突变状态的病人
+```{r pie, echo=FALSE}
+library(ggplot2)
+library(scales)#引入percent函数
+library(RColorBrewer)
+col <- brewer.pal(9,"Blues")[c(2,4,6,8)] #表示使用Blues的2,4,6,8颜色,这样可以区分开
+
+pie<- ggplot(pie.df, aes(x="", y=value, fill=factor(group,levels = c("unmutated", "subclonal","clonal","clonal-subclonal"))))+ #fill设置因子调颜色顺序
+            geom_bar(stat = "identity",colour="black",size=1)+
+            coord_polar(theta ="y", start=0)
+blank_theme <- theme_minimal()+
+  theme(
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    panel.border = element_blank(),
+    panel.grid=element_blank(),
+    axis.ticks = element_blank(),
+    plot.title=element_text(size=14, face="bold")
+  )      
+pie.out <- pie + scale_fill_manual(values = col) + blank_theme +
+                 theme(axis.text.x=element_blank())+
+                 labs(title = "% cases based on mutations:",x = NULL, y = NULL, fill = NULL)+
+                 geom_text(aes(y = value/4 + c(0, cumsum(value)[-length(value)]), 
+                 label = percent(value/sum(value))),size=5) #调文本位置,暂时没办法，用AI调吧
+pie.out
+```
+
+### 4.结果
+看图吧，没什么说的
+
+# 三.探索每个driver gene的不同突变类型的样本比例
+### 1.统计93个driver基因的突变类型(克隆突变和亚克隆突以及非突变状态)所在的样本比例,因为4个基因没有突变
+```{r}
+clone.gene.list <- split(colorectal.select.table,colorectal.select.table$Hugo_Symbol)
+temp.list <- lapply(clone.gene.list,function(x){
+                      temp.frame1 <- data.frame(patient=character(0),label=character(0))
+                      for(i in 1:length(unique(x$patient))){
+                        pos <- which(x$patient == unique(x$patient)[i])
+                        temp <- x[pos,c("patient","CI95.timing")]
+                        label <- ifelse(length(unique(temp$"CI95.timing"))==2,"Clonal-Subclonal",ifelse(unique(temp$"CI95.timing")=="Clonal","Clonal","Subclonal"))
+                        #num <- length(pos)
+                        temp1 <- cbind.data.frame(unique(x$patient)[i],label)
+                        temp.frame1 <- rbind.data.frame(temp.frame1,temp1)
+                      }
+                      tt <- table(factor(temp.frame1$label,levels=c("Clonal","Subclonal","Clonal-Subclonal")))
+                      temp.frame <- cbind.data.frame(gene=rep(unique(x$Hugo_Symbol),3),
+                                                     cases=tt/sum(tt)*100)
+                      colnames(temp.frame)[2:3] <- c("group","cases")
+                      temp.frame
+})
+df <- do.call(rbind,temp.list)
+head(df)
+```
+
+### 3.绘制barplot
+```{r barplot, fig.width=12, fig.height=8, echo=FALSE}
+stack.barplot <- ggplot(data=df, mapping=aes(x=gene, y=cases, fill=factor(group,levels=c("Subclonal","Clonal","Clonal-Subclonal"))))+ #levels=c("Subclonal","Clonal","Clonal-Subclonal" 调整颜色顺序
+                      geom_bar(stat="identity",width=0.7,position="stack")+ #default width 0.9 position="stack" position=position_dodge(0.8)
+                      scale_fill_manual(values = col[2:4])+
+                      theme_minimal()+ labs(fill="clone status")+
+                      #x坐标文本字体角度angle，vjust垂直移动多少，hjust水平移动多少，size设置字体大小正常的0.6倍
+                      theme(axis.text.x=element_text(angle=90,vjust=0.5,hjust=0.5,size = rel(0.7),face="bold"),panel.grid.major = element_blank(),panel.grid.minor = element_blank())+
+                      theme(legend.position = "top",legend.key.size = unit(0.5, "cm"))+  #调整图例位置，大小
+                      theme(legend.title=element_text(size=9))+  #调整图例标题大小
+                      theme(legend.text=element_text(size=9))+ #调整图例内部字体大小
+                      labs(y="% cases") #y轴题目
+stack.barplot
+```
+
+### 4.结果
+绝大多数的driver基因在样本中倾向于克隆突变，一部分driver基因不会在样本中同时出现克隆突变和亚克隆突变,BCLAF1基因倾向于亚克隆突变.
+
+# 四.探索93个driver基因变异Distribution of the CCF
+### 1.可视化数据.
+```{r}
+head(colorectal.select.table)
+```
+
+### 2.绘制dotplot.
+```{r dotplot, fig.width=20, fig.height=10, echo=FALSE}
+dot.plot <- ggplot(data=colorectal.select.table, mapping=aes(x=Hugo_Symbol, y=absolute.ccf,fill=factor(CI95.timing,levels = c("Subclonal","Clonal")))) + 
+                geom_jitter(shape= 21,alpha = 1,size=1,width=0.2,color="black",stroke=0.4)+ #You'll have to use shapes from 21 to 25. These are the ones that have colour and fill properties
+                labs(fill = "clone status")+ #设置legend题目为"Legend Title"
+                theme_bw()+scale_fill_manual(values=col[c(1,4)],labels = c("Subclonal","Clonal")) +  #要先设置默认的主题风格
+                theme(legend.position = "top",legend.title = element_text(size = 10),axis.text.x=element_text(angle=90,vjust=0.5,hjust=0.5,size = rel(0.5)),panel.grid.major = element_line(size = 0.1),panel.grid.minor = element_line(size = 0.1))
+dot.plot
+```
+
+# 五.oncoprint
+### 1.可视化数据.
+```{r}
+heat_matrix <- matrix(NA,nrow=93,ncol=513)
+rownames(heat_matrix) <- unique(colorectal.select.table$Hugo_Symbol)
+colnames(heat_matrix) <- unique(colorectal.select.table$patient)
+G_list <- split(colorectal.select.table,colorectal.select.table$Hugo_Symbol)
+G_p_list <- lapply(G_list,function(x){
+            temp <- c()
+            for(i in unique(x$patient)){
+               a <- ifelse(length(unique(x$CI95.timing[which(x$patient==i)]))==2,"ClonalSubclonal;",ifelse(unique(x$CI95.timing[which(x$patient==i)])=="Clonal","Clonal;","Subclonal;"))
+               temp[i] <- a
+            }
+            temp
+})
+for(i in 1:length(G_p_list)){
+  pos <- na.omit(match(names(G_p_list[[i]]),colnames(heat_matrix)))
+  heat_matrix[names(G_p_list[i]),pos] <- unname(G_p_list[[i]])
+  heat_matrix[names(G_p_list[i]),-pos] <- ""
+}
+heat_matrix[1:3,1:10]
+mat <- heat_matrix
+```
+
+### 2.可视化.
+```{r oncoprint, fig.width=20, fig.height=10, echo=FALSE}
+library(ComplexHeatmap)
+  col = c("Clonal" = "red", "Subclonal" = "#008000","ClonalSubclonal"="blue")
+  alter_fun = list(
+    background = function(x, y, w, h) {
+      grid.rect(x, y, w-unit(0.5, "mm"), h-unit(0.5, "mm"), gp = gpar(fill = "#CCCCCC", col = NA))
+    },
+    Subclonal = function(x, y, w, h) {
+      grid.rect(x, y, w-unit(0.5, "mm"), h-unit(0.5, "mm"), gp = gpar(fill = "#008000", col = NA))
+    },
+    Clonal = function(x, y, w, h) {
+      grid.rect(x, y, w-unit(0.5, "mm"), h-unit(0.5, "mm"), gp = gpar(fill = "red", col = NA))
+    },
+    ClonalSubclonal = function(x, y, w, h) {
+      grid.rect(x, y, w-unit(0.5, "mm"), h-unit(0.5, "mm"), gp = gpar(fill = "blue", col = NA))
+    }
+  )
+  #In this case, we need to define a function to extract different alteration types and pass the function to get_type argument. 
+  #The function should return a vector of alteration types.
+  oncoPrint(mat, get_type = function(x) strsplit(x, ";")[[1]],
+            alter_fun = alter_fun, col = col, 
+            column_title = "OncoPrint for colorectal cancer clonality mutations",
+            heatmap_legend_param = list(title = "Alternations", at = c("Clonal", "Subclonal","ClonalSubclonal"), 
+                                        labels = c("Clonal", "Subclonal","ClonalSubclonal")))
+```
+
+# 六.展示driver基因克隆突变和亚克隆突变富集分析结果
+### 1.导入driver基因克隆突变和亚克隆突变富集分析
+```{r}
+load("D:/R/Project/预后分析/克隆预后分析/结直肠癌克隆预后分析/Results/1.刻画克隆性变异/permutation.test.result.RData")
+head(temp)
+```
+
+### 2.可视化
+```{r}
+
+```
+
